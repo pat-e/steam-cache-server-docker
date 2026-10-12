@@ -6,11 +6,10 @@
 # A git tag v1.2.3 also publishes :1.2.3 and :1.2.
 # Pull requests build the image and do not push it.
 #
-# The package is private the first time it is created, even when this
-# repository is public. The last step tries to mark it public. If that
-# fails, set Visibility to Public once at:
+# Container packages can stay private even when the repository is public.
+# The last step checks that an anonymous docker pull works. If it does not,
+# set Visibility to Public once at:
 #   https://github.com/users/<owner>/packages/container/<repo>/settings
-# After that, docker pull works without logging in.
 
 name: Publish container image
 
@@ -86,30 +85,37 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-      - name: Make the package public
+      # GITHUB_TOKEN cannot change user-package visibility (the API returns 404).
+      # Ask anyway, then prove the image is anonymously pullable. A public
+      # GHCR image still needs an anonymous registry token; a bare curl is 401.
+      - name: Check the package is public
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -u
-          package="${IMAGE_NAME##*/}"
-          package="$(printf '%s' "$package" | tr '[:upper:]' '[:lower:]')"
+          package="$(printf '%s' "${IMAGE_NAME##*/}" | tr '[:upper:]' '[:lower:]')"
           settings_url="https://github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package}/settings"
-          echo "Setting container package '${package}' to public..."
-          ok=0
+          gh api --method PATCH \
+              -H "Accept: application/vnd.github+json" \
+              "/user/packages/container/${package}" \
+              -f visibility=public >/tmp/pkg.json 2>/tmp/pkg.err || true
+          public=0
           for i in 1 2 3 4 5 6; do
-            if gh api --method PATCH \
-                -H "Accept: application/vnd.github+json" \
-                "/user/packages/container/${package}" \
-                -f visibility=public > /tmp/pkg.json; then
-              ok=1
+            if token=$(curl -fsS "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMAGE_NAME}:pull" \
+                 | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') \
+               && curl -fsS -o /dev/null \
+                    -H "Authorization: Bearer ${token}" \
+                    -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+                    "https://ghcr.io/v2/${IMAGE_NAME}/manifests/latest"; then
+              public=1
               break
             fi
-            echo "Package API not ready yet (attempt ${i}). Waiting..."
+            echo "Anonymous pull not ready yet (attempt ${i}). Waiting..."
             sleep 10
           done
-          if [ "$ok" -eq 1 ]; then
-            echo "Package visibility is public. Pull with:"
+          if [ "$public" -eq 1 ]; then
+            echo "Package is public. Pull with:"
             echo "  docker pull ${REGISTRY}/${IMAGE_NAME}:latest"
           else
             echo "::warning title=Package is still private::Open ${settings_url} and set Visibility to Public. docker pull works without a login only after that. Later pushes keep that setting."

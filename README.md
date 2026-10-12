@@ -304,9 +304,9 @@ Image-specific variables:
 - `.github/workflows/publish.yml`: on every push to `main`, GitHub Actions
   builds `linux/amd64` and pushes `ghcr.io/pat-e/steam-gui-docker`. Tags are
   `latest` (the `main` branch), `sha-<commit>`, and, for a git tag `v1.2.3`,
-  `1.2.3` and `1.2`. The container package is private until its visibility is
-  set to Public (the workflow tries this; otherwise it is a one-time switch
-  in the package settings). After that, `docker pull` needs no login.
+  `1.2.3` and `1.2`. The workflow checks that `docker pull` works without a
+  login. If a new package stays private, set it to Public once in the package
+  settings; later pushes keep that setting.
 
 ## Known limitations
 
