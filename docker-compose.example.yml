@@ -1,9 +1,11 @@
 # Example compose file. Copy to docker-compose.yml and replace every <...>
 # placeholder. Two networking options are shown; enable exactly ONE.
 #
-# Local Network Game Transfers need the container to be a real host on your
-# LAN (peer discovery uses broadcast). Docker's default bridge network (NAT)
-# breaks discovery, so use macvlan (option A) or host networking (option B).
+# Steam finds other PCs by broadcasting on UDP 27031-27036, then sends Local
+# Network Game Transfers on TCP 27040. Docker's default bridge (NAT) does not
+# carry those broadcasts, so other PCs never see this container. macvlan
+# (option A) puts the container on the LAN as its own host. Host networking
+# (option B) uses the Docker host's own address for the same ports.
 
 services:
   steam-gui:
@@ -66,17 +68,21 @@ services:
     #   SUP_GROUP_IDS: "<render-gid>"
 
     # ---- Option A: macvlan (container gets its own LAN IP) -----------------
+    # UDP 27031-27036 and TCP 27040 are then the container's, at 192.168.0.50,
+    # the same way they would be on a PC. Other Steam clients can discover it.
     networks:
       lan:
-        ipv4_address: <192.0.2.50>  # a free, static IP on your LAN (outside DHCP range)
-    # Web UI: http://<container-ip>:5800   VNC: <container-ip>:5900
+        ipv4_address: <192.168.0.50>  # a free, static IP on your LAN (outside DHCP range)
+    # Web UI: http://192.168.0.50:5800   VNC: 192.168.0.50:5900
     # No `ports:` needed (and none possible) with macvlan.
 
     # ---- Option B: host networking ------------------------------------------
+    # Same discovery ports (UDP 27031-27036) and transfer port (TCP 27040),
+    # but on the Docker host's own LAN address instead of a separate one.
     # Remove the `networks:` block above (and at the bottom) and use:
     # network_mode: host
-    # Web UI: http://<docker-host-ip>:5800   VNC: <docker-host-ip>:5900
-    # Make sure nothing else on the host uses 5800/5900 or the Steam ports.
+    # Web UI: http://192.168.0.10:5800   VNC: 192.168.0.10:5900
+    # Make sure nothing else on the host uses 5800/5900, UDP 27031-27036, or TCP 27040.
 
 networks:
   lan:
@@ -85,6 +91,6 @@ networks:
       parent: <eth0>                # host NIC that is attached to your LAN
     ipam:
       config:
-        - subnet: <192.0.2.0/24>    # your LAN subnet
-          gateway: <192.0.2.1>      # your router
-          # ip_range: <192.0.2.48/29>  # optional: range Docker may assign from
+        - subnet: <192.168.0.0/24>  # your LAN subnet
+          gateway: <192.168.0.1>    # your router
+          # ip_range: <192.168.0.48/29>  # optional: range Docker may assign from
