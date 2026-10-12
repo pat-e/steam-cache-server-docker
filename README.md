@@ -14,6 +14,13 @@ or software rendering").
 - Persistent data: `/config` (Steam client, login, settings)
 - Game libraries: any container path you mount, e.g. `/mnt/games`
 
+On another PC, a finished setup looks like this. That PC is pulling the game
+from this container over the LAN, at about 1.4 Gbit/s. The blue bar names the
+source **DOCKER**, which is the container `hostname` in the compose example.
+The red boxes mark that source and the transfer rate.
+
+![Steam on another PC transferring a game from the container. The banner reads "Transferring game files on local network from device: DOCKER", at about 1.4 Gbit/s.](img/steam-gui_transfer_example.webp)
+
 ## Quick start
 
 Pull the image GitHub Actions publishes to GitHub Container Registry:
@@ -59,6 +66,7 @@ into `/config`, then shows the login window.
    `hostname:` in the compose file (the example uses `docker`), otherwise
    Docker uses a random container ID like `3f2a9c1b7d4e`. With
    `network_mode: host` this is ignored and the host's own name is shown.
+   The screenshot at the top is that name on the other PC.
 5. **Settings > Downloads:**
    - *Game File Transfer over Local Network*: on.
    - *Allow transfers from this device to*: **Only me**, so only PCs logged in to
