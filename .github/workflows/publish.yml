@@ -1,0 +1,116 @@
+# Build the image and publish it to GitHub Container Registry.
+#
+# Pushes to main publish:
+#   ghcr.io/<owner>/<repo>:latest
+#   ghcr.io/<owner>/<repo>:sha-<commit>
+# A git tag v1.2.3 also publishes :1.2.3 and :1.2.
+# Pull requests build the image and do not push it.
+#
+# The package is private the first time it is created, even when this
+# repository is public. The last step tries to mark it public. If that
+# fails, set Visibility to Public once at:
+#   https://github.com/users/<owner>/packages/container/<repo>/settings
+# After that, docker pull works without logging in.
+
+name: Publish container image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  # github.repository is "<owner>/<repo>". GHCR image names must be lowercase.
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          labels: |
+            org.opencontainers.image.title=steam-gui
+            org.opencontainers.image.description=Steam desktop client that caches games for LAN transfers
+            org.opencontainers.image.licenses=MIT
+
+      # Steam's client is x86_64/i386 only, so this is not a multi-arch image.
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          pull: true
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate artifact attestation
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Make the package public
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -u
+          package="${IMAGE_NAME##*/}"
+          package="$(printf '%s' "$package" | tr '[:upper:]' '[:lower:]')"
+          settings_url="https://github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package}/settings"
+          echo "Setting container package '${package}' to public..."
+          ok=0
+          for i in 1 2 3 4 5 6; do
+            if gh api --method PATCH \
+                -H "Accept: application/vnd.github+json" \
+                "/user/packages/container/${package}" \
+                -f visibility=public > /tmp/pkg.json; then
+              ok=1
+              break
+            fi
+            echo "Package API not ready yet (attempt ${i}). Waiting..."
+            sleep 10
+          done
+          if [ "$ok" -eq 1 ]; then
+            echo "Package visibility is public. Pull with:"
+            echo "  docker pull ${REGISTRY}/${IMAGE_NAME}:latest"
+          else
+            echo "::warning title=Package is still private::Open ${settings_url} and set Visibility to Public. docker pull works without a login only after that. Later pushes keep that setting."
+          fi

@@ -1,0 +1,137 @@
+#!/bin/sh
+# steam-library-register STEAM_ROOT LIBRARY_PATH [LABEL]
+#
+# Adds LIBRARY_PATH (a path inside the container) to
+# STEAM_ROOT/steamapps/libraryfolders.vdf if it is not listed yet.
+#
+#   * Idempotent: a path that is already listed is left alone.
+#   * Uses the next free numeric index (never overwrites an existing one).
+#   * Shares one "contentid" between libraryfolders.vdf and the library's own
+#     LIBRARY_PATH/libraryfolder.vdf, reusing the id if that file exists.
+#   * Steam must NOT be running: Steam rewrites libraryfolders.vdf on exit.
+#     startapp.sh calls this before Steam starts; do not run it by hand while
+#     Steam is up (use add-steam-library instead, which queues the change).
+#
+# Exit status: 0 = registered or already present, 1 = error, 2 = skipped
+# because the path does not exist (e.g. volume not mounted).
+set -eu
+
+log() { echo "[steam-library] $*" >&2; }
+
+[ $# -ge 2 ] || { log "usage: $0 STEAM_ROOT LIBRARY_PATH [LABEL]"; exit 1; }
+steam_root="$1"
+lib_path="$2"
+lib_label="${3:-}"
+
+# Normalise: strip trailing slashes (but keep "/").
+while [ "${#lib_path}" -gt 1 ] && [ "${lib_path%/}" != "$lib_path" ]; do
+    lib_path="${lib_path%/}"
+done
+
+case "$lib_path" in
+    /*) ;;
+    *) log "'$lib_path' is not an absolute container path, skipping"; exit 1 ;;
+esac
+# VDF values are quoted strings with backslash escapes; refuse anything that
+# would need escaping rather than risk writing a broken file.
+case "$lib_path$lib_label" in
+    *'"'*|*\\*|*"$(printf '\t')"*)
+        log "path/label must not contain quotes, backslashes or tabs: '$lib_path'"; exit 1 ;;
+esac
+if [ "$lib_path" = "/" ] || [ "$lib_path" = "$steam_root" ]; then
+    log "refusing to register '$lib_path'"; exit 1
+fi
+
+vdf="$steam_root/steamapps/libraryfolders.vdf"
+marker="$lib_path/libraryfolder.vdf"
+
+new_contentid() {
+    # Random positive 48-bit number; Steam only needs it to be unique.
+    od -An -N6 -tu8 /dev/urandom | tr -d ' \n'
+}
+
+vdf_value() { # vdf_value FILE KEY  -> first value of "KEY" "value"
+    sed -n "s/^[[:space:]]*\"$2\"[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$1" 2>/dev/null | head -n1
+}
+
+# --- Is the path already listed? (exact string compare, no regex) -----------
+if [ -f "$vdf" ] && awk -v want="$lib_path" '
+        match($0, /^[ \t]*"path"[ \t]+"/) {
+            v = substr($0, RLENGTH + 1); sub(/"[ \t\r]*$/, "", v)
+            sub(/\/+$/, "", v)
+            if (v == want) found = 1
+        }
+        END { exit !found }' "$vdf"; then
+    log "'$lib_path' is already registered"
+    exit 0
+fi
+
+# --- Checks on the library folder -------------------------------------------
+if [ ! -d "$lib_path" ]; then
+    log "'$lib_path' does not exist in the container (volume not mounted?), skipping"
+    exit 2
+fi
+if [ ! -w "$lib_path" ]; then
+    log "WARNING: '$lib_path' is not writable by uid $(id -u); Steam will not be able to use it"
+fi
+
+# Reuse the library's own contentid (and label) if it was a library before.
+contentid=""
+write_marker=0
+if [ -f "$marker" ]; then
+    contentid="$(vdf_value "$marker" contentid)"
+    [ -n "$lib_label" ] || lib_label="$(vdf_value "$marker" label)"
+    [ -n "$contentid" ] || log "WARNING: $marker has no contentid; leaving it untouched and using a new id"
+else
+    write_marker=1
+fi
+[ -n "$contentid" ] || contentid="$(new_contentid)"
+
+# --- Steam-side libraryfolders.vdf ------------------------------------------
+mkdir -p "$steam_root/steamapps"
+if [ ! -f "$vdf" ]; then
+    # Same minimal layout Steam itself writes: entry "0" is the Steam root.
+    printf '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t""\n\t\t"contentid"\t\t"%s"\n\t\t"totalsize"\t\t"0"\n\t\t"update_clean_bytes_tally"\t\t"0"\n\t\t"time_last_update_verified"\t\t"0"\n\t\t"apps"\n\t\t{\n\t\t}\n\t}\n}\n' \
+        "$steam_root" "$(new_contentid)" > "$vdf"
+fi
+
+tmp="$vdf.tmp.$$"
+trap 'rm -f "$tmp"' EXIT
+# Insert a new top-level entry before the LAST closing brace at column 0,
+# using the next free index (max existing index + 1).
+awk -v path="$lib_path" -v label="$lib_label" -v id="$contentid" '
+    { line[NR] = $0 }
+    /^\t"[0-9]+"[ \t\r]*$/ {
+        n = $0; gsub(/[^0-9]/, "", n)
+        if (n + 0 >= next_idx) next_idx = n + 1
+    }
+    /^}[ \t\r]*$/ { close_at = NR }
+    END {
+        if (!close_at) exit 3
+        for (i = 1; i <= NR; i++) {
+            if (i == close_at) {
+                print "\t\"" next_idx "\""
+                print "\t{"
+                print "\t\t\"path\"\t\t\"" path "\""
+                print "\t\t\"label\"\t\t\"" label "\""
+                print "\t\t\"contentid\"\t\t\"" id "\""
+                print "\t\t\"totalsize\"\t\t\"0\""
+                print "\t\t\"update_clean_bytes_tally\"\t\t\"0\""
+                print "\t\t\"time_last_update_verified\"\t\t\"0\""
+                print "\t\t\"apps\""
+                print "\t\t{"
+                print "\t\t}"
+                print "\t}"
+            }
+            print line[i]
+        }
+    }' "$vdf" > "$tmp" || { log "ERROR: $vdf has an unexpected layout, not modified"; exit 1; }
+if [ "$write_marker" = 1 ]; then
+    printf '"libraryfolder"\n{\n\t"contentid"\t\t"%s"\n\t"label"\t\t"%s"\n}\n' \
+        "$contentid" "$lib_label" > "$marker"
+fi
+mkdir -p "$lib_path/steamapps" 2>/dev/null || log "WARNING: cannot create $lib_path/steamapps"
+cp -p "$vdf" "$vdf.bak"
+mv "$tmp" "$vdf"
+trap - EXIT
+log "registered '$lib_path' (label '${lib_label}', contentid $contentid)"

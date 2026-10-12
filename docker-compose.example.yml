@@ -1,0 +1,90 @@
+# Example compose file. Copy to docker-compose.yml and replace every <...>
+# placeholder. Two networking options are shown; enable exactly ONE.
+#
+# Local Network Game Transfers need the container to be a real host on your
+# LAN (peer discovery uses broadcast). Docker's default bridge network (NAT)
+# breaks discovery, so use macvlan (option A) or host networking (option B).
+
+services:
+  steam-gui:
+    image: ghcr.io/pat-e/steam-gui-docker:latest   # or steam-gui:local if you used ./build.sh
+    container_name: steam-gui
+    # Name other Steam clients on your LAN show for this machine (e.g. in
+    # 'Managing downloads for' and the download queue). Without it, Docker uses
+    # a random container ID like 3f2a9c1b7d4e. 'docker' makes it obvious which
+    # client is the Steam container. NOTE: ignored with network_mode: host,
+    # where the container uses the host's own hostname.
+    hostname: docker
+    restart: unless-stopped
+
+    environment:
+      USER_ID: "1000"               # owner of /config and the game library on the host
+      GROUP_ID: "1000"
+      TZ: "Etc/UTC"                 # e.g. Europe/Berlin
+      KEEP_APP_RUNNING: "1"         # restart Steam if it exits or crashes
+      DISPLAY_WIDTH: "1600"
+      DISPLAY_HEIGHT: "900"
+      # Optional: register library folders (container paths, comma-separated)
+      # automatically before Steam starts. Leave unset to manage libraries in
+      # Steam's own UI (Settings > Storage).
+      # STEAM_LIBRARY_PATHS: "/mnt/games"
+      # Optional: GPU mode, see the "Optional: GPU" block below.
+      # SUP_GROUP_IDS: "<render-gid>"
+      # STEAM_GPU: "auto"           # auto (default) | on | off
+      # Optional: protect the VNC / web UI (see the jlesage baseimage docs).
+      # VNC_PASSWORD: "<choose-a-password>"
+
+    volumes:
+      # Steam client, login session and settings. Keep this on fast local disk.
+      - </path/to/appdata/steam-gui>:/config
+      # Game library (local disk or network share). Example:
+      #   - /path/to/games:/mnt/games
+      - </path/to/games>:/mnt/games
+
+    # Steam's embedded browser (CEF) uses /dev/shm; Docker's 64 MB default
+    # can make the UI crash.
+    shm_size: "512m"
+
+    # ---- Privileges ----------------------------------------------------------
+    # Current Steam starts its UI process (steamwebhelper) inside Valve's
+    # "sniper" runtime container via bubblewrap, which needs unprivileged user
+    # namespaces. Docker's default seccomp profile blocks those, and on
+    # AppArmor hosts (Debian/Ubuntu) the docker-default profile denies the
+    # mounts bubblewrap makes. Expected minimum (see README "Privileges"):
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined         # only matters on hosts with AppArmor enabled
+    # NOT needed for this image: cap_add SYS_ADMIN, privileged, /dev/fuse.
+
+    # ---- Optional: GPU (AMD/Intel, open-source drivers) ----------------------
+    # Without these lines the image uses software rendering, which is fine for
+    # a download cache. To use the iGPU/GPU for the UI instead:
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # and add to `environment:` the host's render group id
+    # (`getent group render | cut -d: -f3` on the host):
+    #   SUP_GROUP_IDS: "<render-gid>"
+
+    # ---- Option A: macvlan (container gets its own LAN IP) -----------------
+    networks:
+      lan:
+        ipv4_address: <192.0.2.50>  # a free, static IP on your LAN (outside DHCP range)
+    # Web UI: http://<container-ip>:5800   VNC: <container-ip>:5900
+    # No `ports:` needed (and none possible) with macvlan.
+
+    # ---- Option B: host networking ------------------------------------------
+    # Remove the `networks:` block above (and at the bottom) and use:
+    # network_mode: host
+    # Web UI: http://<docker-host-ip>:5800   VNC: <docker-host-ip>:5900
+    # Make sure nothing else on the host uses 5800/5900 or the Steam ports.
+
+networks:
+  lan:
+    driver: macvlan
+    driver_opts:
+      parent: <eth0>                # host NIC that is attached to your LAN
+    ipam:
+      config:
+        - subnet: <192.0.2.0/24>    # your LAN subnet
+          gateway: <192.0.2.1>      # your router
+          # ip_range: <192.0.2.48/29>  # optional: range Docker may assign from

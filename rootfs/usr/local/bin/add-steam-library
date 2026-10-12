@@ -1,0 +1,72 @@
+#!/bin/sh
+# add-steam-library LIBRARY_PATH [LABEL]
+#
+# Queue a Steam library folder (a path INSIDE the container, e.g. a mounted
+# volume like /mnt/games) for registration. Usage from the host:
+#
+#   docker exec <container> add-steam-library /mnt/games "Games"
+#
+# Steam rewrites its library list when it exits, so editing it while Steam is
+# running is lost. This helper therefore never touches Steam's files. It writes
+# the request to a pending list that startapp.sh applies the next time Steam
+# starts (before Steam is launched). To apply it:
+#
+#   docker restart <container>
+#
+# (or, with KEEP_APP_RUNNING=1, quit Steam from its menu: Steam > Exit.)
+set -eu
+
+state_dir="${STEAM_GUI_STATE_DIR:-/config/.steam-gui}"
+pending="$state_dir/pending-libraries"
+
+usage() {
+    echo "usage: add-steam-library LIBRARY_PATH [LABEL]" >&2
+    echo "  LIBRARY_PATH is a path inside the container, e.g. /mnt/games" >&2
+    exit 1
+}
+[ $# -ge 1 ] && [ $# -le 2 ] || usage
+case "$1" in -h|--help) usage ;; esac
+
+path="$1"
+label="${2:-}"
+while [ "${#path}" -gt 1 ] && [ "${path%/}" != "$path" ]; do path="${path%/}"; done
+
+case "$path" in
+    /*) ;;
+    *) echo "error: '$path' must be an absolute path inside the container" >&2; exit 1 ;;
+esac
+case "$path$label" in
+    *'"'*|*\\*|*"$(printf '\t')"*)
+        echo "error: path/label must not contain quotes, backslashes or tabs" >&2; exit 1 ;;
+esac
+if [ ! -d "$path" ]; then
+    echo "error: '$path' does not exist inside the container." >&2
+    echo "       Mount it first, e.g. in compose: - /path/to/games:$path" >&2
+    exit 1
+fi
+
+mkdir -p "$state_dir"
+touch "$pending"
+if awk -F '\t' -v p="$path" '$1 == p { f = 1 } END { exit !f }' "$pending"; then
+    echo "'$path' is already queued."
+else
+    printf '%s\t%s\n' "$path" "$label" >> "$pending"
+    echo "Queued '$path' as a Steam library."
+fi
+
+# docker exec runs as root by default; hand the files to the app user so
+# startapp.sh (which runs as USER_ID:GROUP_ID) can update the list.
+if [ "$(id -u)" = 0 ]; then
+    chown "${USER_ID:-1000}:${GROUP_ID:-1000}" "$state_dir" "$pending" 2>/dev/null || true
+fi
+
+cat <<MSG
+
+Steam must not be running while its library list is edited, so nothing has
+been changed yet. The folder is registered automatically the next time Steam
+starts. Apply it now with:
+
+    docker restart <container>
+
+(With KEEP_APP_RUNNING=1 you can instead quit Steam via Steam > Exit.)
+MSG
