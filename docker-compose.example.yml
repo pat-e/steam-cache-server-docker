@@ -8,9 +8,9 @@
 # (option B) uses the Docker host's own address for the same ports.
 
 services:
-  steam-gui:
-    image: ghcr.io/pat-e/steam-gui-docker:latest   # or steam-gui:local if you used ./build.sh
-    container_name: steam-gui
+  steam-cache-server:
+    image: ghcr.io/pat-e/steam-cache-server-docker:latest   # or steam-cache-server:local if you used ./build.sh
+    container_name: steam-cache-server
     # Name other Steam clients on your LAN show for this machine (e.g. in
     # 'Managing downloads for' and the download queue). Without it, Docker uses
     # a random container ID like 3f2a9c1b7d4e. 'docker' makes it obvious which
@@ -38,7 +38,7 @@ services:
 
     volumes:
       # Steam client, login session and settings. Keep this on fast local disk.
-      - </path/to/appdata/steam-gui>:/config
+      - </path/to/appdata/steam-cache-server>:/config
       # Game library (local disk or network share). Example:
       #   - /path/to/games:/mnt/games
       - </path/to/games>:/mnt/games

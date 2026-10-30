@@ -59,8 +59,8 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
           labels: |
-            org.opencontainers.image.title=steam-gui
-            org.opencontainers.image.description=Steam desktop client that caches games for LAN transfers
+            org.opencontainers.image.title=steam-cache-server
+            org.opencontainers.image.description=LAN game cache that runs the Steam desktop client
             org.opencontainers.image.licenses=MIT
 
       # Steam's client is x86_64/i386 only, so this is not a multi-arch image.

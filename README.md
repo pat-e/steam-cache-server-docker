@@ -1,4 +1,4 @@
-# steam-gui: a LAN game cache built on the Steam desktop client
+# steam-cache-server: a LAN game cache built on the Steam desktop client
 
 A Docker image that runs the regular Steam desktop client inside
 [jlesage/baseimage-gui](https://github.com/jlesage/docker-baseimage-gui)
@@ -19,27 +19,27 @@ from this container over the LAN, at about 1.4 Gbit/s. The blue bar names the
 source **DOCKER**, which is the container `hostname` in the compose example.
 The red boxes mark that source and the transfer rate.
 
-![Steam on another PC transferring a game from the container. The banner reads "Transferring game files on local network from device: DOCKER", at about 1.4 Gbit/s.](img/steam-gui_transfer_example.webp)
+![Steam on another PC transferring a game from the container. The banner reads "Transferring game files on local network from device: DOCKER", at about 1.4 Gbit/s.](img/steam-cache-server_transfer_example.webp)
 
 ## Quick start
 
 Pull the image GitHub Actions publishes to GitHub Container Registry:
 
 ```sh
-docker pull ghcr.io/pat-e/steam-gui-docker:latest
+docker pull ghcr.io/pat-e/steam-cache-server-docker:latest
 ```
 
-Or build it yourself (`steam-gui:local`):
+Or build it yourself (`steam-cache-server:local`):
 
 ```sh
-./build.sh                                  # builds steam-gui:local
-# or: IMAGE_TAG=you/steam-gui:latest ./build.sh
+./build.sh                                  # builds steam-cache-server:local
+# or: IMAGE_TAG=you/steam-cache-server:latest ./build.sh
 ```
 
 ```sh
 cp docker-compose.example.yml docker-compose.yml
 # edit docker-compose.yml: replace every <...> placeholder, pick ONE network option
-# image: is ghcr.io/pat-e/steam-gui-docker:latest, or steam-gui:local if you built it
+# image: is ghcr.io/pat-e/steam-cache-server-docker:latest, or steam-cache-server:local if you built it
 docker compose up -d
 ```
 
@@ -112,8 +112,8 @@ then restart the container.
 ### With a one-shot command (optional)
 
 ```sh
-docker exec steam-gui add-steam-library /mnt/games "Games"
-docker restart steam-gui
+docker exec steam-cache-server add-steam-library /mnt/games "Games"
+docker restart steam-cache-server
 ```
 
 Steam rewrites its library list when it exits, so you cannot edit it while
@@ -225,14 +225,14 @@ first configuration that works:
 What to check at each step:
 
 ```sh
-docker compose up -d --force-recreate steam-gui
-docker logs -f steam-gui 2>&1 | grep -Ei 'bwrap|namespace|sandbox|webhelper|pressure-vessel'
+docker compose up -d --force-recreate steam-cache-server
+docker logs -f steam-cache-server 2>&1 | grep -Ei 'bwrap|namespace|sandbox|webhelper|pressure-vessel'
 # Steam's own logs (default /config layout):
-docker exec steam-gui sh -c 'grep -Eih "sandbox|namespace|bwrap|crash" \
+docker exec steam-cache-server sh -c 'grep -Eih "sandbox|namespace|bwrap|crash" \
   /config/.steam/root/logs/webhelper*.txt /config/.steam/root/logs/cef_log.txt \
   /config/.steam/root/logs/console_log.txt 2>/dev/null | tail -n 40'
 # Quick userns probe as the app user (ok = namespaces are allowed):
-docker exec -u 1000:1000 steam-gui unshare -U true && echo ok   # use your USER_ID:GROUP_ID
+docker exec -u 1000:1000 steam-cache-server unshare -U true && echo ok   # use your USER_ID:GROUP_ID
 ```
 
 "Works" means you can log in, open Settings, and start a download. A
@@ -310,7 +310,7 @@ Image-specific variables:
 - `tests/test-library.sh`: offline tests for the library logic and `startapp.sh`,
   using a fake Steam binary. Run them with `sh tests/test-library.sh`.
 - `.github/workflows/publish.yml`: on every push to `main`, GitHub Actions
-  builds `linux/amd64` and pushes `ghcr.io/pat-e/steam-gui-docker`. Tags are
+  builds `linux/amd64` and pushes `ghcr.io/pat-e/steam-cache-server-docker`. Tags are
   `latest` (the `main` branch), `sha-<commit>`, and, for a git tag `v1.2.3`,
   `1.2.3` and `1.2`. The workflow checks that `docker pull` works without a
   login. If a new package stays private, set it to Public once in the package
