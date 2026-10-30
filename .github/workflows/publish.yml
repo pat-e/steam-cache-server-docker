@@ -12,6 +12,7 @@
 #   https://github.com/users/<owner>/packages/container/<repo>/settings
 
 name: Publish container image
+run-name: Publish steam-cache-server (${{ github.ref_name }})
 
 on:
   push:
