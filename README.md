@@ -139,6 +139,12 @@ Complete these steps once after opening the Web UI:
 > **Why context-menu focus compatibility mode is mandatory:**
 > Openbox sends an unfocus event before each click. Without **Settings → Interface → Enable context menu focus compatibility mode** enabled, clicks inside dropdowns and right-click menus pass straight through to the window underneath. Because Steam stores this toggle (`EnableContextMenuBlurDelay3`) inside its embedded Chromium LevelDB `localStorage`, the image cannot safely pre-seed it — you must toggle it once manually. It takes effect immediately with no restart required.
 
+<p align="center">
+  <img src="img/steam-cache-server_context_menu_focus.webp" alt="Steam Settings -> Interface showing 'Enable context menu focus compatibility mode' toggled ON under Advanced." width="650">
+  <br>
+  <sub>Toggle <strong>Enable context menu focus compatibility mode</strong> ON under <strong>Steam Settings → Interface → Advanced</strong>.</sub>
+</p>
+
 ---
 
 ## Networking & Firewall
