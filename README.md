@@ -28,7 +28,7 @@
 - **Zero extra client hacks:** Uses Steam's native LAN transfer protocol — no custom DNS hijacking or caching proxies required.
 - **Browser & VNC access:** Manage Steam from any browser via noVNC (`:5800`) or a VNC client (`:5900`).
 - **No GPU required:** Runs on software rendering out of the box, with automatic AMD/Intel GPU acceleration if `/dev/dri` is passed through.
-- **Flexible storage:** Mount local disks or network shares (SMB, NFS, rclone) and manage libraries via Steam's UI, environment variables, or CLI.
+- **Flexible storage:** Mount local disks or network shares (NFS recommended) and add them directly in Steam's UI.
 - **Minimal privileges:** No `privileged` mode, no `CAP_SYS_ADMIN`, and no `/dev/fuse`.
 
 > [!NOTE]
@@ -132,7 +132,7 @@ Complete these steps once after opening the Web UI:
    | **Downloads** → *Allow transfers from this device to* | **Only me** | Restricts transfers to your own account *(pick Friends/Anyone only if intended)*. |
    | **Downloads** → *Shader Pre-Caching* → *Background Vulkan processing* | **OFF** | Saves CPU cycles since this container never launches games (you can disable shader pre-caching entirely). |
 
-5. **Add your game library** under **Settings → Storage** (or use one of the automated options in [Game Libraries](#game-libraries)) and install the games you want cached. Steam automatically keeps them updated.
+5. **Add your game library** under **Settings → Storage → Add Drive → Let me choose another location** (see [Game Libraries](#game-libraries)) and install the games you want cached. Steam automatically keeps them updated.
 6. **Enable LAN transfers on your gaming PCs** under **Steam → Settings → Downloads → Game File Transfer over Local Network**. They will automatically pull installs and updates from this container whenever it has the files.
 
 > [!IMPORTANT]
@@ -189,40 +189,33 @@ Allow the following traffic to/from the container IP (or host IP in host mode), 
 
 ## Game Libraries
 
-Mount as many library paths as you want in `docker-compose.yml` — you can freely mix local disks (e.g. `/mnt/local`) and NAS shares (e.g. `/mnt/games`) as separate libraries inside the same container — and register them using whichever method fits your workflow:
+Mount as many library paths as you want in `docker-compose.yml` — you can freely mix local disks (e.g. `/mnt/local`) and NAS shares (e.g. `/mnt/games`) as separate libraries inside the same container.
 
-### Option 1: Steam UI *(default)*
-Go to **Settings → Storage → Add Drive → Let me choose another location** and select your mounted folder (e.g. `/mnt/games`). The image runs a private D-Bus session bus with `xdg-desktop-portal-gtk` so the native folder picker works inside the container.
+To register a mounted folder inside Steam:
 
-### Option 2: Environment variable *(automatic on startup)*
-```yaml
-environment:
-  STEAM_LIBRARY_PATHS: "/mnt/games,/mnt/games2"
-```
-Before Steam launches, any listed container path that exists and isn't already in `libraryfolders.vdf` is registered automatically (reusing an existing `libraryfolder.vdf` `contentid` if present, or creating one). Already-registered paths are untouched, so it is safe to leave set permanently.
+1. Open **Steam → Settings → Storage**.
+2. Click the drive dropdown → **Add Drive** → **Let me choose another location**.
+3. Browse to your mounted container path (e.g. `/mnt/games`) and select it.
 
-> [!TIP]
-> On a brand-new `/config` directory, Steam hasn't installed itself yet on first boot. Log in once, then restart the container so `STEAM_LIBRARY_PATHS` can be applied.
+The image includes a private D-Bus session bus and `xdg-desktop-portal-gtk` so Steam's native folder picker works seamlessly inside the container.
 
-### Option 3: One-shot CLI helper
-Queue a library path from the host without editing your Compose file:
+### Network-Mounted Libraries (NFS Recommended)
 
-```sh
-docker exec steam-cache-server add-steam-library /mnt/games "Games"
-docker restart steam-cache-server
-```
+If you store your game cache on a NAS or remote server, **NFS is strongly recommended** over SMB or cloud-backed mounts.
 
-Because Steam overwrites `libraryfolders.vdf` on exit, `add-steam-library` queues the request in `/config/.steam-gui/pending-libraries` and applies it on the next Steam startup (restarting the container or choosing **Steam → Exit** when `KEEP_APP_RUNNING=1`). Unmounted paths remain queued and retry automatically on the next start.
+> [!WARNING]
+> **Watch out for SMB Recycle Bins on NAS appliances:**
+> Most NAS systems (Synology, TrueNAS, QNAP, Unraid, etc.) enable a per-share **SMB Recycle Bin** by default. Because Steam constantly stages, overwrites, and deletes temporary/old files during game downloads and updates, using SMB with a recycle bin enabled will rapidly fill your NAS with deleted game data.
+>
+> **Prefer NFS instead.** Only use SMB if your target is a plain Windows Server, if you explicitly **disable the SMB Recycle Bin** on that share, or if you are aware of it and purge it regularly.
 
 <details>
-<summary><strong>Using network-mounted libraries (SMB / NFS / rclone)</strong></summary>
-
-Network shares work well if configured with a few Steam-specific requirements in mind:
+<summary><strong>Additional notes for NFS, SMB &amp; rclone mounts</strong></summary>
 
 - **Permissions & execution:** The `USER_ID:GROUP_ID` user must be able to create files/directories, rename files, and update timestamps. Steam also writes and executes `.steam_exec_test.sh` in the library root, so **do not mount with `noexec`**. For SMB, map ownership with `uid=`/`gid=` (or `forceuser`).
 - **File locking & atomic renames:** Steam stages updates and renames files into place. SMB without proper locking — or `rclone` without `--vfs-cache-mode full` (or at least `writes`) — can trigger failed updates or endless validation loops.
 - **rclone mount propagation:** Mount on the host with `--allow-other` and bind-mount into Docker with `:rshared` (e.g. `/mnt/rclone:/mnt/games:rshared`), otherwise the container sees an empty directory. Ensure the container starts after the mount (e.g. systemd mount dependency + `restart: unless-stopped`).
-- **I/O performance:** Patching, verifying, and serving LAN transfers are I/O intensive. Gigabit SMB/NFS works smoothly; high-latency or cloud-backed mounts will be noticeably slower.
+- **I/O performance:** Patching, verifying, and serving LAN transfers are I/O intensive. Gigabit NFS (or properly configured SMB) works smoothly; high-latency or cloud-backed mounts will be noticeably slower.
 - **Missing share at startup:** If a share is offline when Steam launches, Steam marks the library unavailable. Restore the mount and restart the container.
 
 </details>
@@ -256,7 +249,6 @@ Check `docker logs steam-cache-server` to verify which mode was chosen (`GPU ren
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `STEAM_LIBRARY_PATHS` | *(empty)* | Comma-separated container paths to auto-register in `libraryfolders.vdf` before Steam starts. |
 | `STEAM_GPU` | `auto` | Rendering mode: `auto`, `on`, or `off`. |
 | `STEAM_GUI_FOCUS_NOTICE` | `1` | Set to `0` to suppress the one-time first-run setup notice. |
 | `STEAM_EXTRA_ARGS` | *(empty)* | Extra CLI flags passed to `steam` (e.g. `-no-cef-sandbox`). **Never** pass `-tenfoot` or `-gamepadui` — Big Picture mode cannot serve LAN transfers. |
@@ -337,7 +329,7 @@ docker exec -u 1000:1000 steam-cache-server unshare -U true && echo ok
 ## Known Limitations
 
 - **Manual context-menu toggle:** The Openbox context-menu focus setting cannot be safely pre-seeded in Steam's LevelDB store (see [First-Run Setup](#first-run-setup)).
-- **Folder picker fallback:** Steam's **Add Drive** dialog relies on `xdg-desktop-portal` over a private session D-Bus without systemd. If the dialog opens empty or fails to appear, use `STEAM_LIBRARY_PATHS` or `add-steam-library` instead and check `/config/.steam/root/logs/console_log.txt` for `desktop portal` messages.
+- **Folder picker D-Bus dependency:** Steam's **Add Drive** dialog relies on `xdg-desktop-portal` over a private session D-Bus without systemd. If the dialog opens empty or fails to appear, check `/config/.steam/root/logs/console_log.txt` for `desktop portal` messages.
 - **Self-updating client:** Steam manages its own client binaries inside `/config`, so rebuilding or updating the Docker image does not change the installed Steam client version.
 
 ---
@@ -350,12 +342,9 @@ docker exec -u 1000:1000 steam-cache-server unshare -U true && echo ok
 | Path | Role |
 | --- | --- |
 | [`Dockerfile`](Dockerfile) | Debian 13 `jlesage/baseimage-gui` image with 32-bit libraries, Mesa (software + AMD/Intel GPU drivers), Valve's `steam.deb`, locales, D-Bus, and `xdg-desktop-portal-gtk` (includes a `/var/log` symlink workaround for Debian 13 `apt`). |
-| [`rootfs/startapp.sh`](rootfs/startapp.sh) | Entrypoint run as `USER_ID:GROUP_ID`: detects GPU/software mode, applies library registrations, starts a private D-Bus session bus, shows the one-time notice, and launches `steam -nofriendsui` in desktop mode. |
+| [`rootfs/startapp.sh`](rootfs/startapp.sh) | Entrypoint run as `USER_ID:GROUP_ID`: detects GPU/software mode, starts a private D-Bus session bus, shows the one-time notice, and launches `steam -nofriendsui` in desktop mode. |
 | [`rootfs/etc/openbox/main-window-selection.xml`](rootfs/etc/openbox/main-window-selection.xml) | Maximizes only the main Steam window while letting menus and dialogs float freely. |
 | [`rootfs/etc/xdg-desktop-portal/portals.conf`](rootfs/etc/xdg-desktop-portal/portals.conf) | Configures `xdg-desktop-portal` to use the GTK backend. |
-| [`rootfs/usr/local/bin/steam-library-register`](rootfs/usr/local/bin/steam-library-register) | Idempotent `libraryfolders.vdf` updater used at startup. |
-| [`rootfs/usr/local/bin/add-steam-library`](rootfs/usr/local/bin/add-steam-library) | `docker exec` helper to queue new library folders. |
-| [`tests/test-library.sh`](tests/test-library.sh) | Offline test suite for library registration and `startapp.sh` using a fake Steam binary. Run with `sh tests/test-library.sh`. |
 | [`.github/workflows/publish.yml`](.github/workflows/publish.yml) | Builds `linux/amd64` on pushes to `main` and `v*` tags, attaches build attestations, pushes to `ghcr.io/pat-e/steam-cache-server-docker` (`latest`, `sha-<commit>`, and `1.2.3`/`1.2` for `v1.2.3`), and verifies anonymous `docker pull` works. |
 
 </details>

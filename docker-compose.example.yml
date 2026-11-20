@@ -26,10 +26,6 @@ services:
       KEEP_APP_RUNNING: "1"         # restart Steam if it exits or crashes
       DISPLAY_WIDTH: "1600"
       DISPLAY_HEIGHT: "900"
-      # Optional: register library folders (container paths, comma-separated)
-      # automatically before Steam starts. Leave unset to manage libraries in
-      # Steam's own UI (Settings > Storage).
-      # STEAM_LIBRARY_PATHS: "/mnt/games"
       # Optional: GPU mode, see the "Optional: GPU" block below.
       # SUP_GROUP_IDS: "<render-gid>"
       # STEAM_GPU: "auto"           # auto (default) | on | off

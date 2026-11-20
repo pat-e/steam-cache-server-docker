@@ -78,12 +78,10 @@ ENV LANG=en_US.UTF-8
 #   /etc/openbox/main-window-selection.xml     maximise only the main window;
 #                                              menus and dialogs stay free
 #   /etc/xdg-desktop-portal/portals.conf       use the GTK portal backend
-#   /usr/local/bin/steam-library-register      vdf edit used by startapp.sh
-#   /usr/local/bin/add-steam-library           `docker exec` helper
 COPY rootfs/ /
 
 # fastcompmgr (the baseimage's compositor) is not needed for Steam; disabling
 # it is harmless and removes one moving part.
-RUN chmod 755 /startapp.sh /usr/local/bin/steam-library-register /usr/local/bin/add-steam-library \
+RUN chmod 755 /startapp.sh \
     && if [ -d /etc/services.d/fastcompmgr ]; then touch /etc/services.d/fastcompmgr/disabled; fi \
     && set-cont-env APP_NAME "Steam"

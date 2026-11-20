@@ -52,64 +52,6 @@ fi
 state_dir="${STEAM_GUI_STATE_DIR:-/config/.steam-gui}"
 mkdir -p "$state_dir"
 
-# --- Locate the Steam installation ------------------------------------------
-# Steam records its real location in ~/.steam/root. On a brand-new /config it
-# does not exist yet; the bootstrapper creates it on first start.
-steam_root=""
-if [ -e "$HOME/.steam/root/steam.sh" ]; then
-    steam_root="$(readlink -f "$HOME/.steam/root")"
-else
-    for d in "$XDG_DATA_HOME/Steam" "$HOME/.local/share/Steam"; do
-        if [ -e "$d/steam.sh" ]; then steam_root="$d"; break; fi
-    done
-fi
-
-# --- Optional library registration ------------------------------------------
-# Nothing happens unless STEAM_LIBRARY_PATHS is set or add-steam-library queued
-# a path. Paths are container paths (mount your share there in compose).
-#   STEAM_LIBRARY_PATHS=/mnt/games,/mnt/games2
-# Steam is not running at this point, so it cannot overwrite the edit.
-register_libraries() {
-    # 1) From the environment (re-checked every start, no-op once listed).
-    old_ifs="$IFS"; IFS=','
-    # shellcheck disable=SC2086 # intentional split on commas
-    set -- ${STEAM_LIBRARY_PATHS:-}
-    IFS="$old_ifs"
-    for p in "$@"; do
-        # trim surrounding blanks
-        p="$(printf '%s' "$p" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        [ -n "$p" ] || continue
-        steam-library-register "$steam_root" "$p" "" || true
-    done
-
-    # 2) From the queue written by add-steam-library. Keep entries whose path
-    #    is not available yet (exit 2) so they are retried next start.
-    pending="$state_dir/pending-libraries"
-    [ -s "$pending" ] || return 0
-    keep="$pending.keep.$$"
-    : > "$keep"
-    tab="$(printf '\t')"
-    while IFS="$tab" read -r p label || [ -n "$p" ]; do
-        [ -n "$p" ] || continue
-        rc=0
-        steam-library-register "$steam_root" "$p" "$label" || rc=$?
-        if [ "$rc" -eq 2 ]; then
-            printf '%s\t%s\n' "$p" "$label" >> "$keep"
-        fi
-    done < "$pending"
-    if [ -s "$keep" ]; then mv "$keep" "$pending"; else rm -f "$keep" "$pending"; fi
-}
-
-if [ -n "${STEAM_LIBRARY_PATHS:-}" ] || [ -s "$state_dir/pending-libraries" ]; then
-    if [ -n "$steam_root" ]; then
-        register_libraries
-    else
-        log "Steam is not installed in /config yet (first start)."
-        log "Library folders will be registered on the next start, after you have"
-        log "logged in once. Restart the container then."
-    fi
-fi
-
 # --- D-Bus session bus (for the folder picker) -------------------------------
 # Steam's "Add Drive > Let me choose another location" asks xdg-desktop-portal
 # for a folder picker over the D-Bus session bus. The baseimage has no session
